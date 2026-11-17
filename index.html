@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>설문 앱</title>
+<style>
+:root{--bg:#f3f6f8;--fg:#14232e;--card:#fff;--ac:#0f766e;--mu:#5b6b76;--bd:#d5dde3;--bar:#99d5cf}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1a21;--fg:#e6eef2;--card:#17252e;--ac:#5eead4;--mu:#93a5b0;--bd:#2c3e49;--bar:#1d5a55}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
+header{padding:14px 16px 0;max-width:720px;margin:auto}
+h1{font-size:20px;margin:0 0 10px}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--bd);overflow-x:auto}
+nav button{background:none;border:0;border-bottom:3px solid transparent;color:var(--mu);padding:10px 12px;font:inherit;cursor:pointer;white-space:nowrap}
+nav button.on{color:var(--ac);border-color:var(--ac);font-weight:600}
+main{max-width:720px;margin:auto;padding:14px 16px 60px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
+.q{border-top:1px solid var(--bd);padding-top:12px;margin-top:12px}
+.row{display:flex;gap:8px;align-items:center}
+.row>input,.row>select{flex:1}
+input,select,textarea{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:9px 10px;margin:4px 0}
+textarea{min-height:76px}
+button{font:inherit;border:1px solid var(--ac);background:none;color:var(--ac);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.pri{background:var(--ac);color:var(--bg)}
+button.x{border-color:var(--bd);color:var(--mu);padding:8px 10px}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+label{font-size:14px;color:var(--mu)}
+.opt{display:flex;gap:8px;align-items:center;padding:4px 0}
+.opt input{width:auto;margin:0}
+.mu{color:var(--mu);font-size:14px}
+.bar{position:relative;display:flex;justify-content:space-between;padding:5px 8px;margin:4px 0;border-radius:6px;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--bar);z-index:0}
+.bar span,.bar b{position:relative;z-index:1}
+.big{font-size:28px;font-weight:700;color:var(--ac)}
+pre{white-space:pre-wrap;margin:0;font:13px/1.5 ui-monospace,monospace}
+ul{padding-left:20px;margin:6px 0}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+</style>
+</head>
+<body>
+<header>
+<h1>설문 앱</h1>
+<nav>
+<button data-t="build">설문 만들기</button>
+<button data-t="answer">응답하기</button>
+<button data-t="rules">분석 방식</button>
+<button data-t="result">결과 보기</button>
+</nav>
+</header>
+<main id="main"></main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="config.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,12);
+const T={text:'주관식',single:'단일 선택',multi:'복수 선택',scale:'5점 척도'};
+const M={count:'분포(개수)',avg:'평균',list:'응답 목록',custom:'사용자 수식'};
+let S;try{S=JSON.parse(localStorage.getItem('survey-app')||'null')}catch(e){}
+S=S||{surveys:[],cur:null};
+let tab='build';
+const save=()=>{try{localStorage.setItem('survey-app',JSON.stringify(S))}catch(e){}};
+const cur=()=>S.surveys.find(s=>s.id===S.cur);
+
+function render(){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  const sv=cur();
+  let h=`<div class="card"><div class="row"><select id="sel" aria-label="설문 선택">${S.surveys.map(s=>`<option value="${s.id}" ${s.id===S.cur?'selected':''}>${esc(s.title||'제목 없음')}</option>`).join('')}</select><button onclick="newSv()">새 설문</button>${sv?'<button class="x" onclick="delSv()">삭제</button>':''}</div></div>`;
+  if(!sv){$('#main').innerHTML=h+'<p class="mu">새 설문을 눌러 첫 설문을 만드세요.</p>'+tools();bind();return}
+  h+=({build,answer,rules,result}[tab])(sv)+tools();
+  $('#main').innerHTML=h;bind();
+}
+function bind(){const s=$('#sel');if(s)s.onchange=()=>{S.cur=s.value;save();render()}}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;render()});
+
+function tools(){return cloud()+`<div class="tools"><button onclick="exp()">내보내기(JSON)</button><button onclick="$('#imp').click()">가져오기</button><button onclick="expX()">엑셀 내보내기</button><button onclick="$('#impx').click()">엑셀 가져오기</button><input id="impx" type="file" accept=".xlsx,.xls,.csv" hidden onchange="impX(this.files[0])"><input id="imp" type="file" accept=".json" hidden onchange="imp(this.files[0])"></div>`}
+function newSv(){const id=uid();S.surveys.push({id,title:'새 설문',questions:[],rules:[],responses:[]});S.cur=id;tab='build';save();render()}
+function delSv(){if(confirm('이 설문과 응답을 모두 삭제할까요?')){S.surveys=S.surveys.filter(s=>s.id!==S.cur);S.cur=S.surveys[0]?.id||null;save();render()}}
+function exp(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));a.download='survey-data.json';a.click()}
+function imp(f){if(!f)return;f.text().then(t=>{try{const d=JSON.parse(t);if(!Array.isArray(d.surveys))throw 0;
+  if(JSON.stringify(d).includes('"custom"')&&!confirm('사용자 수식이 포함된 파일입니다. 신뢰할 수 있는 파일만 가져오세요. 계속할까요?'))return;
+  S=d;save();render()}catch(e){alert('올바른 설문 JSON 파일이 아닙니다.')}})}
+
+/* 엑셀 가져오기/내보내기 (현재 설문 1개: 설문·분석·응답 시트) */
+const TI=Object.fromEntries(Object.entries(T).map(([k,v])=>[v,k]));
+const MI=Object.fromEntries(Object.entries(M).map(([k,v])=>[v,k]));
+function expX(){
+  if(!window.XLSX)return alert('엑셀 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.');
+  const s=cur();if(!s)return alert('내보낼 설문이 없습니다.');
+  const wb=XLSX.utils.book_new(),add=(n,r)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(r),n);
+  add('설문',s.questions.map((q,i)=>({번호:i+1,질문:q.text,유형:T[q.type],선택지:(q.options||[]).join(' | ')})));
+  add('분석',s.rules.map(r=>({이름:r.title,질문번호:s.questions.findIndex(q=>q.id===r.qid)+1,방법:M[r.m],수식:r.expr||''})));
+  add('응답',s.responses.map(x=>{const o={제출시각:new Date(x.t).toLocaleString('sv')};
+    s.questions.forEach((q,i)=>{const v=x.a[q.id];o[(i+1)+'. '+q.text]=Array.isArray(v)?v.join(' | '):(v??'')});return o}));
+  XLSX.writeFile(wb,(s.title||'survey')+'.xlsx');
+}
+function impX(f){
+  if(!f)return;if(!window.XLSX)return alert('엑셀 라이브러리를 불러오지 못했습니다.');
+  f.arrayBuffer().then(b=>{try{
+    const wb=XLSX.read(b),rows=n=>wb.Sheets[n]?XLSX.utils.sheet_to_json(wb.Sheets[n],{defval:''}):[];
+    const qs=rows('설문').map(r=>({id:uid(),text:String(r.질문),type:TI[r.유형]||'text',options:String(r.선택지).split('|').map(x=>x.trim()).filter(Boolean)}));
+    if(!qs.length)throw 0;
+    const rl=rows('분석').map(r=>({title:String(r.이름),qid:(qs[r.질문번호-1]||qs[0]).id,m:MI[r.방법]||'count',expr:String(r.수식)}));
+    if(rl.some(r=>r.m==='custom')&&!confirm('사용자 수식이 포함된 파일입니다. 신뢰할 수 있는 파일만 가져오세요. 계속할까요?'))return;
+    const rs=rows('응답').map(r=>{const ks=Object.keys(r),a={};
+      qs.forEach((q,i)=>{const v=r[ks[i+1]];
+        a[q.id]=q.type==='multi'?String(v).split('|').map(x=>x.trim()).filter(Boolean):q.type==='scale'?(v===''?null:+v):q.type==='text'?String(v):(v===''?null:String(v))});
+      return{t:Date.parse(r[ks[0]])||Date.now(),a}});
+    const id=uid();S.surveys.push({id,title:f.name.replace(/\.[^.]+$/,''),questions:qs,rules:rl,responses:rs});
+    S.cur=id;tab='build';save();render();
+  }catch(e){alert('올바른 설문 엑셀 파일이 아닙니다. 먼저 내보내기로 받은 양식을 확인하세요.')}});
+}
+
+/* 서버(Supabase) 연동 */
+let tok=sessionStorage.getItem('tok');
+const link=s=>new URL('respond.html?s='+s.id,location.href).href;
+async function api(p,o={}){const r=await fetch(CFG.url+p,{...o,headers:{apikey:CFG.key,Authorization:'Bearer '+(tok||CFG.key),'Content-Type':'application/json',...o.headers}});if(!r.ok)throw new Error(await r.text());return r.status===204?null:r.json()}
+async function login(){try{const r=await fetch(CFG.url+'/auth/v1/token?grant_type=password',{method:'POST',headers:{apikey:CFG.key,'Content-Type':'application/json'},body:JSON.stringify({email:$('#em').value,password:$('#pw').value})});const d=await r.json();if(!d.access_token)throw new Error(d.error_description||d.msg);tok=d.access_token;sessionStorage.setItem('tok',tok);render()}catch(e){alert('로그인 실패: '+e.message)}}
+function logout(){tok=null;sessionStorage.removeItem('tok');render()}
+async function publish(){const s=cur();try{await api('/rest/v1/surveys?on_conflict=id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({id:s.id,title:s.title,questions:s.questions,rules:s.rules,open:true})});alert('게시했습니다.\n응답 링크:\n'+link(s))}catch(e){alert('게시 실패: '+e.message)}}
+async function closeS(){const s=cur();try{await api('/rest/v1/surveys?id=eq.'+s.id,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({open:false})});alert('마감했습니다. 다시 받으려면 게시/업데이트를 누르세요.')}catch(e){alert('실패: '+e.message)}}
+async function pull(){const s=cur();try{const d=await api('/rest/v1/responses?survey_id=eq.'+s.id+'&select=answers,created_at&order=created_at');s.responses=d.map(x=>({t:Date.parse(x.created_at),a:x.answers}));save();tab='result';render()}catch(e){alert('불러오기 실패: '+e.message)}}
+function cloud(){const s=cur();
+  if(!tok)return `<div class="card"><b>서버 연동</b><div class="mu">응답을 모으려면 관리자 계정으로 로그인하세요.</div><input id="em" type="email" placeholder="이메일" autocomplete="username"><input id="pw" type="password" placeholder="비밀번호" autocomplete="current-password"><button class="pri" onclick="login()">로그인</button></div>`;
+  return `<div class="card"><b>서버 연동</b>${s?`<div class="mu" style="word-break:break-all">응답 링크: ${esc(link(s))}</div><div class="tools"><button class="pri" onclick="publish()">게시/업데이트</button><button onclick="pull()">응답 가져오기</button><button onclick="closeS()">마감</button><button class="x" onclick="logout()">로그아웃</button></div>`:'<button class="x" onclick="logout()">로그아웃</button>'}</div>`}
+
+/* 설문 만들기 */
+function build(sv){
+  return `<div class="card"><label>설문 제목</label><input value="${esc(sv.title)}" oninput="cur().title=this.value;save()">
+  ${sv.questions.map((q,i)=>`<div class="q"><div class="row"><input value="${esc(q.text)}" placeholder="질문 ${i+1}" aria-label="질문 ${i+1}" oninput="cur().questions[${i}].text=this.value;save()"><button class="x" aria-label="질문 삭제" onclick="delQ(${i})">✕</button></div>
+  <select aria-label="질문 유형" onchange="setType(${i},this.value)">${Object.entries(T).map(([k,v])=>`<option value="${k}" ${q.type===k?'selected':''}>${v}</option>`).join('')}</select>
+  ${q.type==='single'||q.type==='multi'?`<textarea placeholder="선택지를 한 줄에 하나씩 입력" oninput="cur().questions[${i}].options=this.value.split('\\n').map(x=>x.trim()).filter(Boolean);save()">${esc(q.options.join('\n'))}</textarea>`:''}</div>`).join('')}
+  <div class="q"><button onclick="addQ()">질문 추가</button></div></div>`}
+function addQ(){cur().questions.push({id:uid(),text:'',type:'single',options:[]});save();render()}
+function delQ(i){cur().questions.splice(i,1);save();render()}
+function setType(i,t){cur().questions[i].type=t;save();render()}
+
+/* 응답하기 */
+function answer(sv){
+  if(!sv.questions.length)return '<p class="mu">먼저 설문 만들기에서 질문을 추가하세요.</p>';
+  return `<div class="card"><b>${esc(sv.title)}</b>${sv.questions.map((q,i)=>{const n='q_'+q.id;let f='';
+    if(q.type==='text')f=`<textarea name="${n}"></textarea>`;
+    else if(q.type==='scale')f=[1,2,3,4,5].map(v=>`<label class="opt"><input type="radio" name="${n}" value="${v}">${v}</label>`).join('');
+    else f=q.options.map(o=>`<label class="opt"><input type="${q.type==='multi'?'checkbox':'radio'}" name="${n}" value="${esc(o)}">${esc(o)}</label>`).join('');
+    return `<div class="q"><div>${i+1}. ${esc(q.text||'(질문 없음)')}</div>${f}</div>`}).join('')}
+  <div class="q"><button class="pri" onclick="submitA()">응답 제출</button> <span class="mu">누적 응답 ${sv.responses.length}건</span></div></div>`}
+function submitA(){const sv=cur(),a={};
+  sv.questions.forEach(q=>{const n='q_'+q.id,els=[...document.getElementsByName(n)];
+    if(q.type==='multi')a[q.id]=els.filter(e=>e.checked).map(e=>e.value);
+    else if(q.type==='text')a[q.id]=els[0].value.trim();
+    else{const c=els.find(e=>e.checked);a[q.id]=c?(q.type==='scale'?+c.value:c.value):null}});
+  sv.responses.push({t:Date.now(),a});save();alert('응답을 저장했습니다.');render()}
+
+/* 분석 방식 입력 */
+function rules(sv){
+  if(!sv.questions.length)return '<p class="mu">질문을 먼저 만드세요.</p>';
+  return `<div class="card"><p class="mu">설문마다 분석 방식을 따로 정합니다. 규칙이 없으면 질문 유형에 맞는 기본 분석을 보여줍니다.</p>
+  ${sv.rules.map((r,i)=>`<div class="q"><div class="row"><input value="${esc(r.title)}" placeholder="분석 이름" aria-label="분석 이름" oninput="cur().rules[${i}].title=this.value;save()"><button class="x" aria-label="규칙 삭제" onclick="delR(${i})">✕</button></div>
+  <select aria-label="대상 질문" onchange="cur().rules[${i}].qid=this.value;save()">${sv.questions.map(q=>`<option value="${q.id}" ${q.id===r.qid?'selected':''}>${esc(q.text||'(질문 없음)')}</option>`).join('')}</select>
+  <select aria-label="분석 방법" onchange="cur().rules[${i}].m=this.value;save();render()">${Object.entries(M).map(([k,v])=>`<option value="${k}" ${r.m===k?'selected':''}>${v}</option>`).join('')}</select>
+  ${r.m==='custom'?`<textarea placeholder="JavaScript 식 예: v.filter(x=>x>=4).length/v.length*100+'%'" oninput="cur().rules[${i}].expr=this.value;save()">${esc(r.expr||'')}</textarea><div class="mu">v = 선택한 질문의 응답 배열, R = 전체 응답, Q = 질문 목록</div>`:''}</div>`).join('')}
+  <div class="q"><button onclick="addR()">분석 추가</button></div></div>`}
+function addR(){const sv=cur();sv.rules.push({title:'',qid:sv.questions[0].id,m:'count',expr:''});save();render()}
+function delR(i){cur().rules.splice(i,1);save();render()}
+
+/* 결과 보기 */
+function calc(r,sv){
+  const q=sv.questions.find(x=>x.id===r.qid),R=sv.responses.map(x=>x.a);
+  if(!q)return '<span class="mu">대상 질문이 없습니다.</span>';
+  const v=R.map(a=>a[r.qid]).filter(x=>x!=null&&x!==''&&!(Array.isArray(x)&&!x.length));
+  if(r.m==='count'){const c={};(q.type==='scale'?[1,2,3,4,5]:q.options||[]).forEach(k=>c[k]=0);
+    v.flat().forEach(x=>c[x]=(c[x]||0)+1);const mx=Math.max(1,...Object.values(c));
+    return Object.entries(c).map(([k,n])=>`<div class="bar"><i style="width:${n/mx*100}%"></i><span>${esc(k)}</span><b>${n}</b></div>`).join('')||'<span class="mu">응답 없음</span>'}
+  if(r.m==='avg'){const n=v.map(Number).filter(x=>!isNaN(x));
+    return n.length?`<div class="big">${(n.reduce((a,b)=>a+b,0)/n.length).toFixed(2)}</div><span class="mu">응답 ${n.length}건 기준</span>`:'<span class="mu">숫자 응답이 없습니다.</span>'}
+  if(r.m==='list')return v.length?`<ul>${v.flat().map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<span class="mu">응답 없음</span>';
+  try{const o=new Function('R','Q','v','return ('+r.expr+')')(R,sv.questions,v);
+    return `<pre>${esc(typeof o==='object'?JSON.stringify(o,null,1):o)}</pre>`}
+  catch(e){return `<span class="mu">수식 오류: ${esc(e.message)}</span>`}
+}
+function result(sv){
+  const rs=sv.rules.length?sv.rules:sv.questions.map(q=>({title:q.text,qid:q.id,m:q.type==='text'?'list':q.type==='scale'?'avg':'count'}));
+  if(!rs.length)return '<p class="mu">질문을 먼저 만드세요.</p>';
+  return `<div class="card"><b>${esc(sv.title)}</b><div class="mu">총 응답 ${sv.responses.length}건</div></div>`+
+    rs.map(r=>`<div class="card"><b>${esc(r.title||'(이름 없음)')}</b><div class="mu">${M[r.m]}</div>${calc(r,sv)}</div>`).join('')}
+
+render();
+</script>
+</body>
+</html>
